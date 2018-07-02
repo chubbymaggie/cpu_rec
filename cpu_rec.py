@@ -244,7 +244,11 @@ class TrainingData(object):
         # we use it.
         default_corpus = basedir+'cpu_rec_corpus'
         if os.access(default_corpus, os.R_OK):
-            for file in os.listdir(default_corpus):
+            files = os.listdir(default_corpus)
+            for file in files:
+                if file.endswith('.corpus.xz') and file[:-3] in files:
+                    log.warning("Both compressed and uncompressed versions of %s: only the uncompressed one is used", file[:-10])
+                    continue
                 for suffix in ('.corpus', '.corpus.xz'):
                     if file.endswith(suffix):
                         self.add_training(file[:-len(suffix)], file = default_corpus+'/'+file, section=None)
@@ -744,15 +748,35 @@ try:
             self.p = FileAnalysis(t)
 
         def scan_file(self, fp):
-            data = TrainingData.unpack_file(super(fp.__class__, fp).read())
+            raw = super(fp.__class__, fp).read()
+            data = TrainingData.unpack_file(raw)
             res, cpu, sz, _, other = self.p.sliding_window(data)
             res = self.p.merge(res, cpu, other)
             pos = 0
             for cpu, cnt in res:
                 if cnt == 0: continue
                 cnt *= 2*sz
-                self.result(offset=pos,file=fp,description="%s (size=%#x)"%(cpu,cnt))
+                self.result(offset=pos,file=fp,description="%s (size=%#x, entropy=%f)"%(cpu,cnt,
+                    self.shannon(raw[pos:pos+cnt])))
                 pos += cnt
+
+        def shannon(self, data):
+            '''
+            Performs a Shannon entropy analysis on a given block of data.
+            This code is very similar to the function 'shannon' from binwalk.modules.entropy, but it has been modified to work with python3 and 'data' of type 'bytes'.
+            '''
+            if not data:
+                return 0
+            entropy = 0
+            length = len(data)
+            seen = dict(((x, 0) for x in range(0, 256)))
+            for byte in data:
+                seen[byte_ord(byte)] += 1
+            for x in range(0, 256):
+                p_x = float(seen[x]) / length
+                if p_x > 0:
+                    entropy -= p_x * math.log(p_x, 2)
+            return (entropy / 8)
 
 except ImportError:
     pass
